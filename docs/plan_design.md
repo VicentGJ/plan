@@ -120,7 +120,7 @@ enum SprintStatus: string
 
 ### `users`
 
-Laravel's default `User` model can be reused. In a single-tenant app, user-level role is enough for the MVP.
+Laravel's default `User` model can be reused. Authorization is handled per-project via `ProjectMember` (see below).
 
 Important columns:
 
@@ -128,7 +128,6 @@ Important columns:
 id
 name
 email
-role Role cast default member
 is_active boolean default true
 avatar_url nullable
 created_at
@@ -139,6 +138,7 @@ Relationships:
 
 ```text
 hasMany Project as ledProjects via lead_id
+hasMany ProjectMember as memberships
 belongsToMany Issue as assignedIssues via issue_assignees
 hasMany Issue as createdIssues via created_by_id
 hasMany Issue as updatedIssues via updated_by_id
@@ -147,10 +147,8 @@ hasMany Comment as authoredComments via author_id
 
 Rules:
 
-- Admins can manage projects, workflow settings, labels, and users.
-- Members can create/update issues and comments.
-- Viewers can read only.
 - `is_active = false` disables access without deleting historical authorship/assignment references.
+- Authorization role is determined by `ProjectMember.role` (see below).
 
 ### `projects`
 
@@ -175,6 +173,7 @@ Relationships:
 ```text
 belongsTo User as lead
 belongsTo State as defaultState
+hasMany ProjectMember
 hasMany State
 hasMany Issue
 hasMany Sprint
@@ -205,6 +204,46 @@ In Progress  -> started
 Done         -> completed
 Cancelled    -> cancelled
 ```
+
+### `project_members`
+
+Links users to projects with a role.
+
+Important columns:
+
+```text
+id
+project_id foreignId -> projects.id
+user_id foreignId -> users.id
+role Role cast default member
+is_active boolean default true
+created_at
+updated_at
+```
+
+Relationships:
+
+```text
+belongsTo Project
+belongsTo User
+```
+
+Indexes/constraints:
+
+```text
+unique(project_id, user_id)
+index(project_id, role)
+index(user_id)
+```
+
+Rules:
+
+- A user can be added to a project once.
+- Admins can manage project settings, workflow states, labels, and members.
+- Members can create/update issues and comments.
+- Viewers can read only.
+- `is_active = false` suspends access without removing history.
+- Deleting a project member reassigns their issues to the project lead or unassigns them.
 
 ### `states`
 
@@ -427,6 +466,7 @@ belongsTo User as author
 classDiagram
     class User
     class Project
+    class ProjectMember
     class State
     class Issue
     class Sprint
@@ -434,6 +474,8 @@ classDiagram
     class Comment
 
     User "0..1" -- "0..*" Project : leads
+    User "1" -- "0..*" ProjectMember : member_of
+    Project "1" *-- "0..*" ProjectMember : has
 
     Project "1" *-- "1..*" State : workflow
     Project "1" -- "0..1" State : default
@@ -493,6 +535,9 @@ Use `routes/web.php` for Inertia pages and mutations. Prefer `Route::resource` f
 /projects
   -> ProjectController resource
 
+/projects/{project}/members
+  -> ProjectMemberController resource
+
 /projects/{project}/states
   -> StateController resource
   + POST states/reorder
@@ -526,6 +571,7 @@ Use scoped route model binding so `State`, `Issue`, `Sprint`, `Label`, and `Comm
 | Controller | Role |
 | --- | --- |
 | `ProjectController` | Project CRUD; create default states on project creation. |
+| `ProjectMemberController` | Project member CRUD and role management. |
 | `StateController` | Workflow column CRUD, default state, and state ordering. |
 | `IssueController` | Issue CRUD, filters, assignment sync, and issue movement. |
 | `BoardController` | Read-only board page/read model grouped by state. |
@@ -665,6 +711,7 @@ The concrete route shape should follow the Laravel routing approach above rather
 ```text
 Auth/session routes from the chosen Laravel starter kit
 Project resource routes
+Nested project member resource routes
 Nested state resource routes plus default/reorder actions
 Nested issue resource routes plus move/assignee-sync actions
 Project board route
@@ -728,6 +775,7 @@ Domain models:
 ```text
 User
 Project
+ProjectMember
 State
 Issue
 Label
@@ -800,6 +848,7 @@ The essence of Plane for basic Kanban/Scrum is:
 
 ```text
 Project
+ProjectMember
 State
 Issue
 Label
