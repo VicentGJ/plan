@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\ProjectRole;
 use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -59,6 +61,46 @@ class Project extends Model
     public function states(): HasMany
     {
         return $this->hasMany(State::class);
+    }
+
+    public function activeMembershipFor(User $user): ?ProjectMember
+    {
+        return $this->members()
+            ->whereBelongsTo($user)
+            ->where('is_active', true)
+            ->first();
+    }
+
+    public function hasActiveMembership(User $user): bool
+    {
+        return $this->members()
+            ->whereBelongsTo($user)
+            ->where('is_active', true)
+            ->exists();
+    }
+
+    public function hasActiveAdmin(User $user): bool
+    {
+        return $this->members()
+            ->whereBelongsTo($user)
+            ->where('is_active', true)
+            ->where('role', ProjectRole::Admin)
+            ->exists();
+    }
+
+    /**
+     * @param  Builder<Project>  $query
+     * @return Builder<Project>
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        return $query->where(function (Builder $query) use ($user) {
+            $query->whereBelongsTo($user, 'lead')
+                ->orWhereHas('members', function (Builder $query) use ($user) {
+                    $query->whereBelongsTo($user)
+                        ->where('is_active', true);
+                });
+        });
     }
 
     /**
